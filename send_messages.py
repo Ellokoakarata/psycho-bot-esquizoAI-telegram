@@ -6,7 +6,7 @@ import time
 
 # Variables de entorno
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ADMIN_CHAT_ID = 5555528445
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 
 if not TELEGRAM_TOKEN or not ADMIN_CHAT_ID:
     raise ValueError("Asegúrate de tenerlas variables de entorno.")
