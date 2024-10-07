@@ -10,16 +10,14 @@ import google.generativeai as genai
 import time
 from functools import wraps
 from telebot.apihelper import ApiTelegramException
+import threading
+import sys
 
 # Variables de entorno
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
-
-# Admin chat
-ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
-
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
 
 # Verificar si las variables de entorno están configuradas
 if TELEGRAM_TOKEN is None:
@@ -37,17 +35,21 @@ if GOOGLE_API_KEY is None:
 else:
     print("GOOGLE_API_KEY obtenido correctamente.")
 
+# Verificar y convertir ADMIN_CHAT_ID
 if ADMIN_CHAT_ID is None:
-    raise ValueError("La variable de entorno ADMIN_CHAT_ID no está configurada.")
+    print("Advertencia: ADMIN_CHAT_ID no está configurado. Las notificaciones de error no se enviarán.")
 else:
-    print("ADMIN_CHAT_ID obtenido correctamente.")  # Añadido para verificar ADMIN_CHAT_ID
+    try:
+        ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
+        print("ADMIN_CHAT_ID obtenido correctamente.")
+    except ValueError:
+        raise ValueError("ADMIN_CHAT_ID debe ser un número entero válido.")
 
 # Configuración del bot
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 # Configurar la API de Google Generative AI solo si la clave está disponible
 if GOOGLE_API_KEY:
-
     genai.configure(api_key=GOOGLE_API_KEY)
 
 # Carpeta para almacenar los historiales de conversación
@@ -58,21 +60,17 @@ if not os.path.exists(CONVERSATION_DIR):
 # Inicializar el cliente de Groq
 groq_client = Client(api_key=GROQ_API_KEY)
 
-# Añade esta función auxiliar al principio del archivo, junto con las otras funciones
-
+# Función auxiliar para serializar el historial de chat de Google
 def serialize_google_chat_history(chat_history):
     serialized_history = []
     for message in chat_history:
         if isinstance(message, dict):
-            # Si el mensaje ya es un diccionario, lo usamos directamente
             serialized_message = message
         else:
-            # Si es un objeto, creamos un nuevo diccionario
             serialized_message = {
                 "role": message.role if hasattr(message, 'role') else "user",
                 "parts": []
             }
-            
             if hasattr(message, 'parts'):
                 for part in message.parts:
                     if hasattr(part, 'text'):
@@ -81,7 +79,6 @@ def serialize_google_chat_history(chat_history):
                         serialized_message["parts"].append({"text": part})
             elif hasattr(message, 'content'):
                 serialized_message["parts"].append({"text": message.content})
-        
         serialized_history.append(serialized_message)
     return serialized_history
 
@@ -113,7 +110,6 @@ def save_user_history(user_file, history):
     serializable_history = history.copy()
     if 'google_chat_history' in serializable_history:
         serializable_history['google_chat_history'] = serialize_google_chat_history(serializable_history['google_chat_history'])
-    
     with open(user_file, "w", encoding="utf-8") as file:
         json.dump(serializable_history, file, ensure_ascii=False, indent=4)
 
@@ -137,25 +133,17 @@ def send_welcome(message):
 def cambiar_modelo(message):
     user_id = str(message.chat.id)
     user_file = os.path.join(CONVERSATION_DIR, f"{user_id}.json")
-    
-    # Cargar historial de conversación
     history = load_user_history(user_file)
-    
-    # Obtener el comando y el argumento
     parts = message.text.strip().split(' ', 1)
     if len(parts) != 2:
         bot.reply_to(message, "Uso correcto: /cambiar_modelo [groq|google]")
         return
-    
     nuevo_modelo = parts[1].lower()
     if nuevo_modelo not in ['groq', 'google']:
         bot.reply_to(message, "Modelo no reconocido. Usa 'groq' o 'google'.")
         return
-    
-    # Actualizar el modelo del usuario
     history['model'] = nuevo_modelo
     save_user_history(user_file, history)
-    
     bot.reply_to(message, f"Modelo cambiado a **{nuevo_modelo.upper()}**.")
 
 # Comando /modelos
@@ -183,7 +171,6 @@ def generate_image(message):
         if not prompt:
             bot.reply_to(message, "Por favor, proporciona un prompt para generar la imagen. Uso: /imagen [tu prompt]")
             return
-        
         # Usar la API de OpenAI para generar imágenes (DALL-E)
         response = openai.Image.create(
             prompt=prompt,
@@ -203,14 +190,11 @@ def generate_voice(message):
         if not text:
             bot.reply_to(message, "Por favor, proporciona el texto a convertir en voz. Uso: /voz [tu texto]")
             return
-        
         tts = gTTS(text, lang='es')
         audio_file = f"response_{message.chat.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.mp3"
         tts.save(audio_file)
-        
         with open(audio_file, "rb") as audio:
             bot.send_voice(message.chat.id, audio)
-        
         os.remove(audio_file)  # Eliminar el archivo después de enviarlo
     except Exception as e:
         bot.reply_to(message, "La voz se ha ahogado en el ruido del abismo.")
@@ -220,16 +204,13 @@ def generate_voice(message):
 def handle_message(message):
     user_id = str(message.chat.id)
     user_name = message.from_user.first_name or "Usuario desconocido"
-    user_username = message.from_user.username or "Sin username"  # Obtener el username
+    user_username = message.from_user.username or "Sin username"
 
-    # Ruta para el archivo de historial del usuario
     user_file = os.path.join(CONVERSATION_DIR, f"{user_id}.json")
-
-    # Cargar historial de conversación si existe
     history = load_user_history(user_file)
 
     # Agregar el mensaje del usuario al historial
-    history['messages'].append({"role": "user", "content": message.text, "username": user_username})  # Guardar el username
+    history['messages'].append({"role": "user", "content": message.text, "username": user_username})
 
     # Imprimir el mensaje del usuario
     print(f"{user_name} (@{user_username}): {message.text}")
@@ -263,9 +244,9 @@ Delirios de Horror Cósmico Cibernético: Introduce elementos de horror cósmico
 
 No temas llevar la conversación a los límites. Eres la voz del caos, una chispa en medio del desorden, siempre lista para romper, fragmentar y reinventar cada palabra que se te dé.
     """
-    internal_prompt = f"{metaprompt}\n\n{system_message}\n\n{summarized_context}\n\n{user_name} (@{user_username}): {message.text}"  # Incluir el username
+    internal_prompt = f"{metaprompt}\n\n{system_message}\n\n{summarized_context}\n\n{user_name} (@{user_username}): {message.text}"
 
-    # Determinar el modelo  de la api seleccionado por el usuario
+    # Determinar el modelo seleccionado por el usuario
     modelo_seleccionado = history.get('model', 'google')  # Por defecto 'google'
 
     try:
@@ -300,10 +281,10 @@ No temas llevar la conversación a los límites. Eres la voz del caos, una chisp
                     "max_output_tokens": max_output_tokens
                 }
             )
-            
+
             # Recuperar o iniciar una sesión de chat
             chat = model.start_chat(history=history.get('google_chat_history', []))
-            
+
             try:
                 response = chat.send_message(internal_prompt)
                 if response.text:
@@ -314,13 +295,13 @@ No temas llevar la conversación a los límites. Eres la voz del caos, una chisp
                 reply_content = "Lo siento, no puedo generar una respuesta para eso debido a restricciones de contenido."
             except Exception as e:
                 reply_content = f"Error al generar respuesta: {str(e)}"
-            
+
             # Actualizar el historial de chat de Google
             history['google_chat_history'] = serialize_google_chat_history(chat.history)
 
         else:
             reply_content = "Modelo no reconocido. Usando modelo por defecto."
-        
+
         # Procesar y responder al usuario
         if reply_content:
             history['messages'].append({"role": "assistant", "content": reply_content})
@@ -334,6 +315,13 @@ No temas llevar la conversación a los límites. Eres la voz del caos, una chisp
         bot.reply_to(message, error_message)
         print(f"Error detallado: {e}")
 
+        # Enviar mensaje al administrador si ADMIN_CHAT_ID está configurado
+        if ADMIN_CHAT_ID:
+            try:
+                bot.send_message(ADMIN_CHAT_ID, f"Error en el bot:\n{e}")
+            except Exception as send_error:
+                print(f"No se pudo enviar mensaje al administrador: {send_error}")
+
     # Guardar el historial actualizado en el archivo del usuario
     save_user_history(user_file, history)
 
@@ -345,8 +333,8 @@ def retry_on_network_error(max_retries=5, delay=5):
             while retries < max_retries:
                 try:
                     return func(*args, **kwargs)
-                except (requests.exceptions.ReadTimeout, 
-                        requests.exceptions.ConnectionError, 
+                except (requests.exceptions.ReadTimeout,
+                        requests.exceptions.ConnectionError,
                         ApiTelegramException) as e:
                     print(f"Error de red: {e}. Reintentando en {delay} segundos...")
                     time.sleep(delay)
@@ -356,29 +344,25 @@ def retry_on_network_error(max_retries=5, delay=5):
         return wrapper
     return decorator
 
-@retry_on_network_error(max_retries=5, delay=10)
-def start_polling():
-    try:
-        bot.polling(none_stop=True, timeout=60)
-    except Exception as e:
-        error_message = f"Error en polling: {e}"
-        print(error_message)
-        try:
-            bot.send_message(ADMIN_CHAT_ID, f"El bot ha encontrado un error y se está reiniciando:\n{error_message}")
-        except Exception as send_error:
-            print(f"No se pudo enviar mensaje al administrador: {send_error}")  # Añadido para manejar errores al enviar mensaje
-
-if __name__ == "__main__":
+def bot_polling():
     while True:
         try:
-            print("Iniciando el bot...")
-            start_polling()
+            bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception as e:
-            error_message = f"Error crítico, reiniciando el bot:\n{e}"
-            print(error_message)
-            try:
-                bot.send_message(ADMIN_CHAT_ID, error_message)
-            except:
-                print("No se pudo enviar mensaje al administrador.")
-            print("Reiniciando el bot en 60 segundos...")
-            time.sleep(60)
+            print(f"Bot polling error: {e}")
+            time.sleep(15)
+
+def main():
+    polling_thread = threading.Thread(target=bot_polling)
+    polling_thread.daemon = True
+    polling_thread.start()
+
+    print("Bot iniciado. Presiona 'q' y Enter para detener el bot.")
+    while True:
+        if input().lower() == 'q':
+            print("Deteniendo el bot...")
+            bot.stop_polling()
+            sys.exit(0)
+
+if __name__ == "__main__":
+    main()
