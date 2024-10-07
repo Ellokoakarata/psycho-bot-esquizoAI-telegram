@@ -15,6 +15,11 @@ from telebot.apihelper import ApiTelegramException
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+
+# Admin chat
+ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
+
 
 # Verificar si las variables de entorno están configuradas
 if TELEGRAM_TOKEN is None:
@@ -31,6 +36,11 @@ if GOOGLE_API_KEY is None:
     print("Advertencia: La variable de entorno GOOGLE_API_KEY no está configurada. Las funcionalidades de Google estarán deshabilitadas.")
 else:
     print("GOOGLE_API_KEY obtenido correctamente.")
+
+if ADMIN_CHAT_ID is None:
+    raise ValueError("La variable de entorno ADMIN_CHAT_ID no está configurada.")
+else:
+    print("ADMIN_CHAT_ID obtenido correctamente.")  # Añadido para verificar ADMIN_CHAT_ID
 
 # Configuración del bot
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -353,10 +363,12 @@ def start_polling():
     except Exception as e:
         error_message = f"Error en polling: {e}"
         print(error_message)
-        bot.send_message(ADMIN_CHAT_ID, f"El bot ha encontrado un error y se está reiniciando:\n{error_message}")
+        try:
+            bot.send_message(ADMIN_CHAT_ID, f"El bot ha encontrado un error y se está reiniciando:\n{error_message}")
+        except Exception as send_error:
+            print(f"No se pudo enviar mensaje al administrador: {send_error}")  # Añadido para manejar errores al enviar mensaje
 
 if __name__ == "__main__":
-    ADMIN_CHAT_ID = 5555528445  # Tu ID de administrador
     while True:
         try:
             print("Iniciando el bot...")
