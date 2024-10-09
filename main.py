@@ -301,7 +301,7 @@ def handle_message(message):
         meta_prompt_content = "Archivo meta_prompt no encontrado."
 
     # Crear el prompt interno para la API
-    internal_prompt = f"{meta_prompt_content}\n\n{system_message}\n\n{summarized_context}\n\n{user_name} (@{user_username}): {system.text}"
+    internal_prompt = f"{meta_prompt_content}\n\n{system_message}\n\n{summarized_context}\n\n{user_name} (@{user_username}): {message.text}"
 
     # Determinar el modelo seleccionado por el usuario
     modelo_seleccionado = history.get('model', 'google')  # Por defecto 'google'
